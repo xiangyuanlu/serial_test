@@ -1,0 +1,21 @@
+use std::collections::HashMap;
+fn main() {
+    println!("abc");
+}
+pub fn group_anagrams(strs: Vec<String>) -> Vec<Vec<String>> {
+    let mut mp: HashMap<String, Vec<String>> = HashMap::new();
+
+    for str in strs {
+        let mut cv: Vec<char> = str.chars().collect();
+        cv.sort();
+        let ky = cv.iter().collect::<String>();
+        let vec = Vec::new();
+        let dvec = mp.entry(ky).or_insert(vec);
+        dvec.push(str);
+    }
+    let mut res = Vec::new();
+    for val in mp.values() {
+        res.push(val.to_owned());
+    }
+    res
+}

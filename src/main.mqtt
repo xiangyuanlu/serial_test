@@ -1,0 +1,195 @@
+use anyhow::Result;
+use rumqttc::Client;
+use rumqttc::Connection;
+use rumqttc::Event;
+use rumqttc::Incoming;
+use rumqttc::LastWill;
+use rumqttc::MqttOptions;
+use rumqttc::QoS;
+use std::path::Path;
+use std::thread;
+use std::time::Duration;
+
+use rust_dev_op::{get_device_manager, DeviceManager};
+
+mod file_op;
+mod mqttd;
+mod rust_dev_op;
+mod rust_file_op;
+fn test_1() {
+    let path = Path::new("./aaa.xlsx");
+    let a_f = file_op::open_1(path);
+    match a_f {
+        Ok(()) => println!("file ok"),
+        Err(err) => {
+            println!("{:?}", err);
+        }
+    }
+}
+
+fn test_2() {
+    let path = Path::new("./aaa.xlsx");
+    let a_f = file_op::open_2(path);
+    match a_f {
+        Ok(()) => println!("file "),
+        Err(err) => {
+            println!("{:?}", err);
+        }
+    }
+}
+
+fn parse_file() -> Result<()> {
+    let path = Path::new("test.xlsx");
+    let file = rust_file_op::open_23(path)?;
+    Ok(())
+}
+
+fn test_dev_op() -> Result<()> {
+    let dm_ins = get_device_manager();
+    let mut res = dm_ins.add_device("101".to_string())?;
+    res = dm_ins.add_device("101".to_string())?;
+    Ok(())
+}
+
+fn test_dev_add() -> Result<()> {
+    parse_file()?;
+    test_dev_op()?;
+
+    Ok(())
+}
+
+// fn main() {
+//     let res = test_dev_add();
+//     if let Err(err) = res {
+//         println!("main Error: {}", err);
+//     }
+//     println!("error_handler");
+// }
+
+use rumqttd::{Broker, Config};
+
+use clap::Arg;
+use clap::Parser;
+use std::sync::Arc;
+
+/// Simple program to run mqtt as server or client
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = "abcdefg")]
+struct Args {
+    /// role of the mqtt run
+    #[arg(short, long)]
+    role: String,
+}
+
+fn server_start() -> Result<()> {
+    let config = config::Config::builder()
+        .add_source(config::File::with_name("rumqttd.toml"))
+        .build()?;
+    let config: Config = config.try_deserialize()?;
+    let mut broker = Broker::new(config);
+    broker.start()?;
+    anyhow::Ok(())
+}
+
+fn client_sub_start() -> Result<()> {
+    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+    let will = LastWill::new("hello/rumqtt", "good bye", QoS::AtMostOnce, false);
+    mqttoptions
+        .set_keep_alive(Duration::from_secs(5))
+        .set_last_will(will);
+    println!("client sub start before thread started");
+
+    let (mut client, mut connection) = Client::new(mqttoptions, 10);
+    client.subscribe("hello/rumqtt", QoS::AtMostOnce)?;
+
+    let th1 = thread::spawn(move || recv_topic(connection));
+    println!("client sub start before join");
+    th1.join();
+    println!("client sub start before exit");
+
+    anyhow::Ok(())
+}
+
+fn recv_topic(mut connection: Connection) {
+    loop {
+        if let Ok(notification) = connection.recv_timeout(Duration::from_millis(1000)) {
+            println!("Notification = {notification:?}");
+            match notification {
+                Ok(Event::Incoming(Incoming::Publish(p))) => {
+                    println!("--0-- Topic: {}, Payload: {:?}", p.topic, p.payload);
+                }
+                Ok(Event::Incoming(i)) => {
+                    println!("--1-- Incoming = {i:?}");
+                }
+                Ok(Event::Outgoing(o)) => println!("--2-- Outgoing = {o:?}"),
+                Err(err) => {
+                    println!("--e-- recv error: {:?}", err);
+                }
+            }
+        }
+    }
+    todo!()
+}
+
+fn client_pub_start() -> Result<()> {
+    let mut mqttoptions = MqttOptions::new("test-2", "localhost", 1883);
+    let will = LastWill::new("hello/rumqtt", "good bye", QoS::AtMostOnce, false);
+    mqttoptions
+        .set_keep_alive(Duration::from_secs(5))
+        .set_last_will(will);
+
+    let (mut client, mut connection) = Client::new(mqttoptions, 10);
+    println!("client pub start before thread started");
+    let th1 = thread::spawn(move || {
+        for i in 0..1000 {
+            let r: std::prelude::v1::Result<(), rumqttc::ClientError> =
+                client.publish("hello/rumqtt", QoS::AtMostOnce, false, vec![1; i]);
+            match r {
+                Ok(_) => {
+                    println!("pub success i:{}", i);
+                }
+                _ => println!("pub error"),
+            }
+            thread::sleep(Duration::from_millis(1000));
+        }
+    });
+    // let th2 = thread::spawn(move || recv_topic(connection));
+    // println!("client sub start before join");
+    // th2.join();
+    th1.join();
+    println!("client pub start before exit");
+
+    anyhow::Ok(())
+}
+
+fn main() {
+    let args = Args::parse();
+
+    match args.role.as_str() {
+        "pub" => {
+            let r = client_pub_start();
+            if let Err(e) = r {
+                println!("error when client started: {}", e);
+            }
+            println!("start as client");
+        }
+        "sub" => {
+            let r = client_sub_start();
+            if let Err(e) = r {
+                println!("error when client started: {}", e);
+            }
+            println!("start as client");
+        }
+        "server" => {
+            let r = server_start();
+            if let Err(e) = r {
+                println!("error when server started: {}", e);
+            }
+            println!("start as server");
+        }
+        _ack => {
+            println!("args role illegal");
+        }
+    }
+    return;
+}
